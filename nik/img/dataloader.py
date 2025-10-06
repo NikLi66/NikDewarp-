@@ -160,7 +160,7 @@ class NikDataSet(Data.Dataset):
         return self.process(img, fp)
 
     def process(self, img, fp):
-        img = cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_ANYCOLOR)
+        # img = cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_ANYCOLOR)
         if len(img.shape) > 2 and img.shape[2] == 3:
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         fp = zip_decode(fp, np.int16, [self._fp_height_raw, self._fp_width_raw, 2]).astype(np.float32)
