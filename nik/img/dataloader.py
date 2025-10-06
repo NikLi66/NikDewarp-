@@ -13,11 +13,6 @@ import torch.utils.data as Data
 from nik.utils.util_img_io import get_img_offset
 from nik.utils.util_zip import zip_decode
 
-def nik_async(f):
-    def wrapper(*args, **kwargs):
-        thr = Thread(target=f, args=args, kwargs=kwargs)
-        thr.start()
-    return wrapper
 
 def crop_image_tight(img, grid2D, rand_edge):
     """
@@ -121,7 +116,7 @@ def crop_border(img_RGB, grid2D, size):
     return img, grid2D
 
 class NikDataSet(Data.Dataset):
-    def __init__(self, img_height, img_width, use_ori, use_canny_input, pk_list_path, is_shuffle=True, num_workers=1):
+    def __init__(self, img_height, img_width, use_ori, use_canny_input, data_list_path, is_shuffle=True, num_workers=1):
         self._is_shuffle = is_shuffle
         self._logger = logging.getLogger()
 
@@ -143,79 +138,26 @@ class NikDataSet(Data.Dataset):
         self._fp_width_raw = 256
         self._img_offset_raw = get_img_offset(img_height=self._img_height_raw, img_width=self._img_width_raw)
 
-        with open(pk_list_path, 'r') as f:
+        with open(data_list_path, 'r') as f:
             pk_path_list = list(line.strip() for line in f if line)
 
         self._pk_list_in = []
-        self._pk_list_out = []
-        self._pk_pos = 0
-        self._lock = Lock()
 
         for i, line in enumerate(pk_path_list):
-            if os.path.exists(line):
-                with open(line.strip(), 'rb') as f2:
-                    pk_list = pickle.load(f2)
-                    self._logger.info(
-                        "[%d/%d]: Read %s with %d utts" % (i, len(pk_path_list), line.strip(), len(pk_list)))
-                    for item in pk_list:
-                        self._pk_list_in.append(item)
-
+            with open(line, "rb") as f:
+                self._pk_list_in.append(pickle.load(f))
 
         if self._is_shuffle:
             random.shuffle(self._pk_list_in)
 
-        self._work = True
-        for i in range(0,num_workers):
-            self.Process_Thread_Proxy()
-
-    @nik_async
-    def Process_Thread_Proxy(self):
-        '''
-        模拟多线程，提高加载速度
-        '''
-        process_num = 10
-        while self._work:
-            item_list_in = []
-            with self._lock:
-                if len(self._pk_list_out) < 5000:
-                    while len(item_list_in) < process_num:
-                        item = self._pk_list_in[self._pk_pos]
-                        self._pk_pos = self._pk_pos + 1
-                        if self._pk_pos == len(self._pk_list_in):
-                            self._pk_pos = 0
-                            if self._is_shuffle:
-                                random.shuffle(self._pk_list_in)
-                        item_list_in.append(item)
-
-            if len(item_list_in) > 0 :
-                item_list_out = []
-                for item in item_list_in:
-                    img = item['img']  # HWC [1024, 960, 3]
-                    fp = item['fp']  # WHC [693, 1012, 2]
-                    img, fp, mask = self.process(img, fp)
-                    item_list_out.append((img, fp, mask))
-
-                with self._lock:
-                    self._pk_list_out.extend(item_list_out)
-            else:
-                time.sleep(0.1)
 
     def __len__(self):
         return len(self._pk_list_in)
 
     def __getitem__(self, id):
-        while True:
-            item = None
-            with self._lock:
-                if len(self._pk_list_out) > 0:
-                    item = self._pk_list_out.pop()
-            if item is not None:
-                return item
-            else:
-                time.sleep(1)
-
-    def stop_thread(self):
-        self._work = False
+        data = self._pk_list_in[id]
+        img, fp = data["image"], data["fiducial_points"]
+        return self.process(img, fp)
 
     def process(self, img, fp):
         img = cv2.imdecode(np.frombuffer(img, np.uint8), cv2.IMREAD_ANYCOLOR)
